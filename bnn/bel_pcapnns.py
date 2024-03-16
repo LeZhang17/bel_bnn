@@ -7,6 +7,8 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 from tensorflow_probability import layers as tfpl
+from tensorflow.keras.layers import InputLayer, Dense
+
 import matplotlib.pyplot as plt
 from numpy.random import default_rng
 
@@ -31,48 +33,21 @@ y_pca = pca_Y.fit_transform(y_scaled)
 
 X_train, X_test, y_train, y_test = train_test_split(X_pca, y_pca, test_size=0.2, random_state=42)
 
-def posterior(kernel_size, bias_size=0, dtype=None):
-    n = kernel_size + bias_size
-    c = np.log(np.expm1(1.))
-    return tf.keras.Sequential([
-        tfp.layers.VariableLayer(2 * n, dtype=dtype),
-        tfp.layers.DistributionLambda(lambda t: tfd.Independent(
-            tfd.Normal(loc=t[..., :n],
-                       scale=1e-5 + tf.nn.softplus(c + t[..., n:])),
-            reinterpreted_batch_ndims=1)),
-    ])
-
-
-def prior(kernel_size, bias_size=0, dtype=None):
-    n = kernel_size + bias_size
-    return tf.keras.Sequential([
-        tfp.layers.VariableLayer(n, dtype=dtype),
-        tfp.layers.DistributionLambda(lambda t: tfd.Independent(
-            tfd.Normal(loc=t, scale=1),
-            reinterpreted_batch_ndims=1)),
-    ])
-
-
-hidden_units = 32
+hidden_units = 100
+output_dim = y_train.shape[1]
 
 model = tf.keras.Sequential([
-    tf.keras.layers.InputLayer(input_shape=X_train.shape[1]),
-    tfpl.DenseVariational(units=hidden_units,
-                          make_prior_fn=prior,
-                          make_posterior_fn=posterior,
-                          kl_weight=1 / X_train.shape[0],
-                          activation='relu'),
-
-
-    tfpl.DenseVariational(units=y_train.shape[1],
-                          make_prior_fn=prior,
-                          make_posterior_fn=posterior,
-                          kl_weight=1 / X_train.shape[0]),
+    InputLayer(input_shape=X_train.shape[1]),
+    Dense(hidden_units, activation='relu'),
+    Dense(tfp.layers.MultivariateNormalTriL.params_size(output_dim)),
+    tfp.layers.MultivariateNormalTriL(event_size=output_dim),
 ])
 
-model.compile(loss='mean_squared_error', optimizer=tf.optimizers.Adam(learning_rate=0.01))
 
-history = model.fit(X_train, y_train, epochs=200, verbose=False,validation_data=(X_test, y_test))
+model.compile(loss=lambda y, distribution: -distribution.log_prob(y),
+              optimizer=tf.optimizers.Adam(learning_rate=0.01))
+
+history = model.fit(X_train, y_train, epochs=200, verbose=False, validation_data=(X_test, y_test))
 
 
 plt.plot(history.history['loss'], label='Train Loss')
@@ -84,8 +59,8 @@ plt.legend(loc='upper right')
 plt.show()
 
 sample_num = 100
-preds = [model(X_test) for _ in range(sample_num)]
-preds = np.array([pred.numpy() for pred in preds])
+predicted_distributions = model(X_test)
+preds = predicted_distributions.sample(sample_num)
 
 pca_ytest = pca_Y.inverse_transform(y_test)
 real_ytest = scaler_y.inverse_transform(pca_ytest)
