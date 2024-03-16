@@ -24,6 +24,7 @@ X_scaled = scaler_X.fit_transform(X)
 scaler_y = StandardScaler()
 y_scaled = scaler_y.fit_transform(y)
 
+# Issue here - you should fit the PCA to the training data and then only transform the test set
 pca_X = PCA(n_components=5)
 X_pca = pca_X.fit_transform(X_scaled)
 pca_Y = PCA(n_components=5)
